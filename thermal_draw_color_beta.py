@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from scipy import ndimage
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 
 #mlx = seeed_mlx9064x.grove_mxl90640()
 mlx = seeed_mlx9064x.grove_mxl90641()
@@ -25,6 +26,7 @@ mlx_interp_shape = (mlx_shape[0]*mlx_interp_val,
                     mlx_shape[1]*mlx_interp_val) #new shape(160 by 120)
 
 fig = plt.figure(figsize=(12,9))#start fig??
+
 ax = fig.add_subplot(111)#subplot?
 fig.subplots_adjust(0.05,0.05,0.95,0.95) # get rid of unnecessary padding
 therm1 = ax.imshow(np.zeros(mlx_interp_shape),interpolation='none',
@@ -47,7 +49,6 @@ def updateplot():
     therm1.set_array(data_array) # set data
     therm1.set_clim(vmin=np.min(data_array),vmax=np.max(data_array)) # set bounds
     cbar.on_mappable_changed(therm1) # update colorbar range
-
     ax.draw_artist(therm1) # draw new thermal image
     fig.canvas.blit(ax.bbox) # draw background
     fig.canvas.flush_events() # show the new image
@@ -58,6 +59,11 @@ while True:
     t1 = time.monotonic() # for determining frame rate
     try:
         updateplot() # update plot
+        canvas = FigureCanvas(fig)
+        canvas.draw()
+        graph_image = np.array(fig.canvas.get_renderer()._renderer)
+        graph_image = cv2.cvtColor(graph_image,cv2.COLOR_RGB2BGR)
+        cv2.imshow("graph image",graph_image)
     except:
         continue
     # approximating frame rate
