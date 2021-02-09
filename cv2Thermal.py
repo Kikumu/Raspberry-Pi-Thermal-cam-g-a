@@ -4,6 +4,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import math
+from random import seed
+from random import random
+from random import randrange
+import random as randchoice
 from scipy import ndimage
 from skimage.restoration import estimate_sigma
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
@@ -43,12 +47,12 @@ BreedingSpeciesIsRandom = True #True: elitism doesnt occur. allows more diverse 
 highScoreBased = True #breed/select species based on high score(True) or overall fitness(False) Prerequisite: BreedingSpeciesIsRandom = False
 
 Steps = 2
-Exposure = 3 #in seconds
+Exposure = 10 #in seconds
 
 #isAverageDuration = False # for each genomes exposure to environment, if set to true, genome is graded based on average score.
 #if set to false, direct genome score is taken for the last timestep
 
-PopulationSize = 50
+PopulationSize = 20
 NumberOfGenerations = 500
 
 disjointmentConstant = 0.3
@@ -847,7 +851,7 @@ def obtainOutputs(genome):
     for key in genome.neuron_dictionary:
         if genome.neuron_dictionary[key].getStatus() == 1 and index < len(testOutputs) and genome.neuron_dictionary[key].getInputNumber() == index:
             output_values = np.append(output_values,genome.neuron_dictionary[key].getValue())
-            print("OUT: ",output_values[index]," INDEX: ",index)
+            #print("OUT: ",output_values[index]," INDEX: ",index)
             if index == 0 or index == 2 or index == 3:
                 if output_values[index] > 180:
                     output_values[index] = 180
@@ -925,6 +929,24 @@ def createHSVwindow():
     cv2.createTrackbar("U-H","HSV1 BARS",180,180, nothing)
     cv2.createTrackbar("U-S","HSV1 BARS",255,255, nothing)
     cv2.createTrackbar("U-V","HSV1 BARS",255,255, nothing)
+    
+def setDefaultTrackbarValues():
+    cv2.setTrackbarPos("L-H","HSV1 BARS",0)
+    cv2.setTrackbarPos("L-S","HSV1 BARS",0)
+    cv2.setTrackbarPos("L-V","HSV1 BARS",180)
+    cv2.setTrackbarPos("U-H","HSV1 BARS",180)
+    cv2.setTrackbarPos("U-S","HSV1 BARS",255)
+    cv2.setTrackbarPos("U-V","HSV1 BARS",255)
+    font = cv2.FONT_HERSHEY_COMPLEX
+    
+def setNetworkTrackbarValues(array):
+    cv2.setTrackbarPos("L-H","HSV1 BARS",int(array[0]))
+    cv2.setTrackbarPos("L-S","HSV1 BARS",int(array[1]))
+    cv2.setTrackbarPos("L-V","HSV1 BARS",int(array[2]))
+    cv2.setTrackbarPos("U-H","HSV1 BARS",int(array[3]))
+    cv2.setTrackbarPos("U-S","HSV1 BARS",int(array[4]))
+    cv2.setTrackbarPos("U-V","HSV1 BARS",int(array[5]))
+    font = cv2.FONT_HERSHEY_COMPLEX
 ##-------------------------------------------------------------------------------------------------------
     
 ##--score estimator(s)
@@ -936,32 +958,462 @@ def est(img):
     return cv2.Laplacian(img,cv2.CV_64F).var()
 ##---
 
-createHSVwindow()
-while True:
-    t1 = time.monotonic() # for determining frame rate
-    try:
-        updateplot() # update plot
-        canvas = FigureCanvas(fig)
-        plt.axis('off')
-        plt.axis('tight')
-        plt.axis('image')
-        canvas.draw()
-        graph_image = np.array(fig.canvas.get_renderer()._renderer)
-        graph_image = hsv_color_space(graph_image)
-        graph_image = houghLines(graph_image)
-        score = estimate_noise(graph_image)
-        if math.isnan(score) == True:
-            score = 0.0
-        #graph_image = crop_image(graph_image, pixel_value=255)
-        #print("shape: ",graph_image.shape)
-        print("noise level",score)
-        cv2.imshow("graph image",graph_image)
-    except:
-        continue
-    # approximating frame rate
-    t_array.append(time.monotonic()-t1)
-    if len(t_array)>10:
-        t_array = t_array[1:] # recent times for frame rate approx
-    print('Frame Rate: {0:2.1f}fps'.format(len(t_array)/np.sum(t_array)))
 
+##--initialise hsv---------------------------------------------------
+createHSVwindow()
+##--------------------------------------------------------
+
+
+##-------------------------------main evaluator-------------------------
+def mainEvaluator(genome):
+    timeout = time.time() + Exposure
+    
+    if mutateInEnvironment == True:
+        if randrange(1,3) == 1:
+            genome.setEnvironmentalMutationChance(genome.getEnvironmentalMutationChance() * 0.95)
+        else:
+            genome.setEnvironmentalMutationChance(genome.getEnvironmentalMutationChance() * 1.05263)
+    
+    highScore = 0
+    while True:
+        try:
+            updateplot() # update plot
+            canvas = FigureCanvas(fig)
+            plt.axis('off')
+            plt.axis('tight')
+            plt.axis('image')
+            canvas.draw()
+            graph_image = np.array(fig.canvas.get_renderer()._renderer)
+            setDefaultTrackbarValues()
+            mask   = hsv_color_space(graph_image)
+            #mask    = houghLines(mask1)
+            mask    = cv2.resize(mask, (128,128))
+            cv2.imshow("Default Window", mask)
+            
+            if mutateInEnvironment == True:
+                if genome.getEnvironmentalMutationChance() > random():
+                    #print("skeet")
+                    genome = mutateGenomeInPopulation(genome)
+            
+            updateInputs(genome,mask.flatten())
+            evaluateGenome(genome)
+            
+            setNetworkTrackbarValues(obtainOutputs(genome))
+            mask = hsv_color_space(graph_image)
+            #mask  = houghLines(mask)
+            mask  = cv2.resize(mask, (128,128))
+            
+            cv2.imshow("Network Window", mask)
+            #score = estimate_noise(mask)
+            score = est(mask)
+            
+            if math.isnan(score) == True:
+                score = 0.0
+            
+            if genome.getScore()!= None:
+                if score < genome.getScore() and genome.getStagnation()==None:
+                    genome.setStagnation(1)
+                elif score < genome.getScore():
+                    genome.setStagnation(genome.getStagnation() + 1)
+                    
+                if score > highScore:
+                    genome.setStagnation(0)
+
+            genome.setScore(score)
+            if genome.getScore() > highScore:
+                highScore = genome.getScore() 
+            resetNeuronsInGenome(genome)
+            key = cv2.waitKey(1)
+        except:
+            continue
+        if time.time() > timeout or key == 27:
+            #print("nxt")
+            break
+##----------------------------------------------------------------------------------
+        
+        
+
+##speciation and pooling----------------------------------------------------------
+class Pool_:
+    def __init__(self):
+        self.species = []
+        self.generation = None
+        self.highestFitness = None
+        self.globalSpeciesAverage = None
+        
+    def getGlobalSpeciesAverage(self):
+        return self.globalSpeciesAverage
+    
+    def setGlobalSpeciesAverage(self,value):
+        self.globalSpeciesAverage = value
+        
+    def addSpecie(self, specie):
+        self.species.append(specie)
+        
+    def clearSpecies(self):
+        self.species = []
+    
+    def setGeneration(self,value):
+        self.generation = value
+        
+    def getGeneration(self):
+        return self.generation
+    
+    def setHighestFitness(self,value):
+        self.highestFitness = value
+        
+    def getHighestFitness(self):
+        return self.highestFitness
+    
+class newSpecies:
+    def __init__(self):
+        self.genomes = []
+        self.genomeMascot = None 
+        self.speciesFitness = 0
+        self.averageGenomeFitness = 0
+        self.highestFitnessGenome = 0
+        self.staleness = 0
+        
+        self.previousFitness = None
+        self.previousHighestGenome = None
+        
+    def getPreviousHighestGenome(self):
+        return self.previousHighestGenome
+    
+    def setPreviousHighestGenome(self,value):
+        self.previousHighestGenome = value
+        
+    def setPreviousFitness(self,value):
+        self.previousFitness = value
+        
+    def getPreviousFitness(self):
+        return self.previousFitness
+        
+    def addGenome(self,genome):
+        self.genomes.append(genome)
+        
+    def clearGenomes(self):
+        self.genomes = []
+        
+    def getSpeciesMascot(self):
+        return self.genomeMascot
+        
+    def setSpeciesMascot(self,genome):
+        self.genomeMascot = genome
+        
+    def getSpeciesFitness(self):
+        return self.speciesFitness
+    
+    def setSpeciesFitness(self,fitness):
+        self.speciesFitness = fitness
+        
+    def getAverageFitness(self):
+        return self.averageGenomeFitness
+    
+    def setAverageFitness(self, average):
+        self.averageGenomeFitness = average
+        
+    def getHighestFitnessGenome(self):
+        return self.highestFitnessGenome
+    
+    def setHighestFitnessGenome(self,fitness):
+        self.highestFitnessGenome = fitness
+        
+    def getStaleness(self):
+        return self.staleness
+    
+    def setStaleness(self, value):
+        self.staleness = value
+        
+
+def resetSpeciesInPool():
+    for s in Pool.species:
+        s.clearGenomes()
+        s.setSpeciesFitness(0)
+        s.setAverageFitness(0)
+
+def removeEmptySpeciesInPool():
+    species = []
+    for s in Pool.species:
+        if len(s.genomes) > 0:
+            species.append(s)
+        else:
+            pass
+    Pool.species = species
+    
+def setNewMascotInPool():
+    for s in Pool.species:
+        g_ = randchoice.choice(s.genomes)
+        s.setSpeciesMascot(g_)
+        
+def createNewSpecies(genome):
+    newSpecie = newSpecies()
+    newSpecie.addGenome(genome)
+    newSpecie.setSpeciesMascot(genome)
+    Pool.addSpecie(newSpecie)
+    
+def genomeDiff(genome,genome1):
+    if genome == None or genome1 == None:
+        raise Exception("Genome of nonetype is not allowed")
+    avg_diff = matchingGenesInGenome(genome,genome1)
+    excess = excessGenesInGenome(genome,genome1)
+    dis = disjointGenesInGenome(genome, genome1)
+    N = 0
+    if genome.getMaxInnovation() < 20 and genome1.getMaxInnovation() < 20:
+        N = 1
+    else:
+        N = max(genome.getMaxInnovation(),genome1.getMaxInnovation())
+    
+    result = disjointmentConstant * dis + weightImportanceConstant * avg_diff  + excessGenesConstant * excess
+    return result
+
+def cullWeakGenomesInPool(speciesPool): #by average
+    for s in speciesPool:
+        genomes = []
+        for g in s.genomes:
+            if g.getFitness() < s.getAverageFitness():
+                pass
+            else:
+                genomes.append(g)
+        s.genomes = genomes
+    return speciesPool
+
+def generateSpecies(genomes):
+    for g in genomes:
+        foundSpecies = False
+        for s in Pool.species:
+            genomicDistance = genomeDiff(s.genomeMascot,g)
+            if genomicDistance <= speciesDistanceLimiter:
+                s.addGenome(g)
+                foundSpecies = True
+                break
+        if foundSpecies == False:
+            createNewSpecies(g)
+
+def calculateSpecieFitness(specie):
+    highestGenomeFitness = 0
+    for g in specie.genomes:
+        #print("GSCR: ",g.getScore(), "SPECIE LNGTH: ",len(specie.genomes))
+        g.setFitness(g.getScore()/len(specie.genomes))
+        if g.getFitness() > highestGenomeFitness:
+            highestGenomeFitness = g.getFitness()
+        specie.setSpeciesFitness(specie.getSpeciesFitness() + g.getFitness())
+
+    avg = specie.getSpeciesFitness()/len(specie.genomes)
+    specie.setAverageFitness(avg)
+    
+    if  highestGenomeFitness > specie.getHighestFitnessGenome():
+        specie.setStaleness(0)
+    else:
+        specie.setStaleness(specie.getStaleness() + 1)
+    
+    specie.setHighestFitnessGenome(highestGenomeFitness)
+    
+def calculateFitnessOfAllSpecies():
+    highestSpecies = 0
+    globalSum  = 0
+    for s in Pool.species:
+        calculateSpecieFitness(s)
+        if s.getSpeciesFitness() > highestSpecies:
+            highestSpecies = s.getSpeciesFitness()
+        globalSum = globalSum + s.getSpeciesFitness()
+    Pool.setHighestFitness(highestSpecies)
+    Pool.setGlobalSpeciesAverage(globalSum/len(Pool.species))
+    
+def removeTheWeak():
+    survived = []
+    for s in Pool.species:
+        speciePerformance = s.getSpeciesFitness()/Pool.getGlobalSpeciesAverage() * PopulationSize
+        live = math.floor(speciePerformance)
+        if live >=1:
+            survived.append(s)
+    print("Survived: ", len(survived), " Died: ",(len(Pool.species) - len(survived)))
+    Pool.species = survived
+##-------------------------------------------------------------------------------------
+
+
+
+
+##-----breed-------------------------------------------------------
+def selectSpecies():
+    if BreedingSpeciesIsRandom == False:
+        if highScoreBased == False:
+            completeFitness = 0
+            for s in Pool.species:
+                completeFitness += s.getSpeciesFitness()
+            randomSelect = random()*completeFitness
+            countFit = 0
+            for s in Pool.species:
+                countFit += s.getSpeciesFitness()
+                if countFit >= randomSelect:
+                    return s
+        else:
+            completeFitness = 0
+            for s in Pool.species:
+                completeFitness += s.getHighestFitnessGenome()
+            randomSelect = random()*completeFitness
+            countFit = 0
+            for s in Pool.species:
+                countFit += s.getHighestFitnessGenome()
+                if countFit >= randomSelect:
+                    return s
+    else:
+        return randchoice.choice(Pool.species)
+    
+def selectGenome(specie):
+    if BreedingGenomesIsRandom == False:
+        completeFitness = 0
+        for g in specie.genomes:
+            completeFitness = completeFitness + g.getFitness()
+        randomSelect = random()*completeFitness
+        countFit = 0
+        for g in specie.genomes:
+            countFit = countFit + g.getFitness()
+            if countFit >= randomSelect:
+                return g
+    else:
+        #return a random genome
+        return randchoice.choice(specie.genomes)
+    
+def breedNextPopulation(NextGenerationPopulation ,PopulationSize):
+    avg = 0
+    sum_ = 0
+    sum_genes = 0
+    for s in Pool.species:
+        p1 = randchoice.choice(s.genomes)
+        p2 = randchoice.choice(s.genomes)
+        child = crossover(p1,p2)
+
+        if mutateInEnvironment == False:
+            child = mutateGenomeInPopulation(child)
+            
+        sum_genes = sum_genes + len(child.gene_dictionary)
+        sum_  = sum_ + len(child.neuron_dictionary)
+        NextGenerationPopulation.append(child)
+        
+    j = len(NextGenerationPopulation)
+    print("j: ",len(NextGenerationPopulation))
+    
+    while(j < PopulationSize):
+        parent1 = None
+        parent2 = None
+        child = None
+        if BreedChance > random():
+            species1 = selectSpecies()
+            if species1 == [] or species1 == None:
+                raise Exception("Empty species not valid")
+            else:
+                parent1 = selectGenome(species1)
+                parent2 = selectGenome(species1)
+                
+            if parent1 == None:
+                print("parent1 didnt meet threshold")
+            elif parent2 == None:
+                print("parent2 didnt meet threshold")
+            else:
+                child = crossover(parent1,parent2)
+                if mutateInEnvironment == False:
+                    child = mutateGenomeInPopulation(child)
+                sum_  = sum_ + len(child.neuron_dictionary)
+                sum_genes = sum_genes + len(child.gene_dictionary)
+                NextGenerationPopulation.append(child)
+                j +=1
+        else:
+            species1 = selectSpecies()
+            if species1 == []:
+                raise Exception("Empty species not valid")
+            else:
+                child = selectGenome(species1)
+                if mutateInEnvironment == False:
+                    child = mutateGenomeInPopulation(child)
+            if child == None:
+                print("Lone genome unavailable")
+            else:
+                sum_ = sum_ + len(child.neuron_dictionary)
+                sum_genes = sum_genes + len(child.gene_dictionary)
+                NextGenerationPopulation.append(child)
+                j+=1
+    avg = sum_/len(NextGenerationPopulation)
+    avg_g = sum_genes/len(NextGenerationPopulation)
+    print("NEXT GEN AVG NET SIZE: ",avg, " AVG GENE SIZE: ",avg_g)
+    return NextGenerationPopulation
+
+def evaluateSpeciesAndAssignFitnesses():
+    for s in Pool.species:
+        for g in s.genomes:
+            mainEvaluator(g)
+    calculateFitnessOfAllSpecies()
+    
+def removeStagnantGenomesInSpecies():
+    if removeStagantGenomes == True:
+        for s in Pool.species:
+            genomes = []
+            print("gnms bfr: ",len(s.genomes))
+            for g in s.genomes:
+                if g.getStagnation()!=None:
+                    if g.getStagnation() > stagnantGenome:
+                        pass
+                    else:
+                        genomes.append(g)
+            s.genomes = genomes
+            print("gnms aftr: ",len(s.genomes))
+
+def removeStagnantSpeciesInPool():
+    if len(Pool.species) > 1:
+        species = []
+        for s in Pool.species:
+            if s.getStaleness() > stagnantSpecie:
+                pass
+            else:
+                species.append(s)
+        Pool.species = species
+
+##-------------------------------------------------------------------------------------
+
+
+##---MAIN------------------------------------------------------------
+def createStartingPopulation(PopulationSize,Population,testInputs,testOutputs):
+    for i in range(PopulationSize):
+        Empty_genome = createNewGenome()
+        c            = buildStartingNetwork(Empty_genome,len(testInputs),len(testOutputs))
+        newNet       = c.createConnections()
+        newNet       = mutateGenomeInPopulation(newNet)
+        Population.append(newNet)
+    print("FINISHED")
+    return Population
+##---------------------------------------------------------------------------------
+
+
+##----------------------------------STORAGE VARS-----------------------------
+Pool       = Pool_()
+Population = []
+NextGenerationPopulation = []
+##---------------------------------------------------------------------------
+
+##------------------------------------------INITIALIZE STARTING POP----------------
+Population = createStartingPopulation(PopulationSize,Population,testInputs,testOutputs)
+##----------------------------------------------------------------------
+print("Starting Population created")
+##------------------------------------------------------------------
+for i in range(NumberOfGenerations):
+    generateSpecies(Population)
+    removeEmptySpeciesInPool()
+    evaluateSpeciesAndAssignFitnesses()
+    removeStagnantGenomesInSpecies()
+    removeEmptySpeciesInPool()
+    removeTheWeak()
+    removeStagnantSpeciesInPool()
+    setNewMascotInPool()
+    NextGenerationPopulation = breedNextPopulation(NextGenerationPopulation,PopulationSize)
+    Population = []
+    Population = NextGenerationPopulation
+    NextGenerationPopulation = []
+    print("NUMBER OF SPECIES: ", len(Pool.species), "GENERATION: ",i,"POPULATION SIZE",len(Population))
+    print("SPECIE(S) RUNDOWN....................................................")
+    if i == NumberOfGenerations - 1:
+        cap.release()
+        cv2.destroyAllWindows()
+    for i in Pool.species:
+        print("Fitness: ", i.getSpeciesFitness(), "Average: ", i.getAverageFitness(), "Highest Genome: ",i.getHighestFitnessGenome(), " Staleness: ",i.getStaleness())
+    resetSpeciesInPool()
 
