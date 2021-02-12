@@ -53,7 +53,7 @@ Exposure = 10 #in seconds
 #if set to false, direct genome score is taken for the last timestep
 
 PopulationSize = 20
-NumberOfGenerations = 500
+NumberOfGenerations = 800
 
 disjointmentConstant = 0.3
 weightImportanceConstant = 0.84
@@ -167,6 +167,7 @@ class createNewGenome:
         this.neuron_dictionary = {}#key is neuron pos in network
         this.max_neuron = None #max number of neurons
         this.score = None
+        this.highScore = 0
         this.maxInnovation = None
         this.stagnation = None
         this.linkMutationChance = genomeLinkMutationChance
@@ -181,6 +182,11 @@ class createNewGenome:
         this.disableGeneChance = DisableGeneChance
         this.flipNegativeChance = genomeFlipNegativeChance
         this.flipPositiveChance = genomeFlipPositiveChance
+        
+    def getHighScore(this):
+        return this.highScore
+    def setHighScore(this,value):
+        this.highScore = value
         
     def getFlipPositiveChance(this):
         return this.flipPositiveChance
@@ -974,9 +980,9 @@ def mainEvaluator(genome):
         else:
             genome.setEnvironmentalMutationChance(genome.getEnvironmentalMutationChance() * 1.05263)
     
-    highScore = 0
     while True:
         try:
+            score_array = []
             updateplot() # update plot
             canvas = FigureCanvas(fig)
             plt.axis('off')
@@ -986,7 +992,7 @@ def mainEvaluator(genome):
             graph_image = np.array(fig.canvas.get_renderer()._renderer)
             setDefaultTrackbarValues()
             mask   = hsv_color_space(graph_image)
-            #mask    = houghLines(mask1)
+            mask    = houghLines(mask)
             mask    = cv2.resize(mask, (128,128))
             cv2.imshow("Default Window", mask)
             
@@ -1000,33 +1006,37 @@ def mainEvaluator(genome):
             
             setNetworkTrackbarValues(obtainOutputs(genome))
             mask = hsv_color_space(graph_image)
-            #mask  = houghLines(mask)
+            mask  = houghLines(mask)
             mask  = cv2.resize(mask, (128,128))
             
             cv2.imshow("Network Window", mask)
             #score = estimate_noise(mask)
-            score = est(mask)
+            score = estimate_noise(mask)
             
             if math.isnan(score) == True:
                 score = 0.0
+            score_array.append(score)
             
-            if genome.getScore()!= None:
-                if score < genome.getScore() and genome.getStagnation()==None:
-                    genome.setStagnation(1)
-                elif score < genome.getScore():
-                    genome.setStagnation(genome.getStagnation() + 1)
-                    
-                if score > highScore:
-                    genome.setStagnation(0)
-
-            genome.setScore(score)
-            if genome.getScore() > highScore:
-                highScore = genome.getScore() 
             resetNeuronsInGenome(genome)
             key = cv2.waitKey(1)
         except:
             continue
+        
         if time.time() > timeout or key == 27:
+            average_score = (sum(score_array)/float(len(score_array)))
+            if genome.getScore()!= None:
+                if average_score < genome.getScore() and genome.getStagnation()==None:
+                    genome.setStagnation(1)
+                elif average_score < genome.getScore():
+                    genome.setStagnation(genome.getStagnation() + 1)
+                    
+                if average_score > genome.getHighScore():
+                    genome.setStagnation(0)
+
+            if average_score > genome.getHighScore():
+                genome.setHighScore(average_score)
+                
+            genome.setScore(average_score)
             #print("nxt")
             break
 ##----------------------------------------------------------------------------------
@@ -1039,6 +1049,7 @@ class Pool_:
         self.species = []
         self.generation = None
         self.highestFitness = None
+        self.globalHighScore = None
         self.globalSpeciesAverage = None
         
     def getGlobalSpeciesAverage(self):
@@ -1224,11 +1235,21 @@ def removeTheWeak():
     survived = []
     for s in Pool.species:
         speciePerformance = s.getSpeciesFitness()/Pool.getGlobalSpeciesAverage() * PopulationSize
-        live = math.floor(speciePerformance)
+        if math.isnan(speciePerformance) == True:
+            speciePerformance = 0
+            live = 0
+        else:
+            live = math.floor(speciePerformance)
         if live >=1:
             survived.append(s)
-    print("Survived: ", len(survived), " Died: ",(len(Pool.species) - len(survived)))
-    Pool.species = survived
+    Died = len(Pool.species) - len(survived)
+    print("Survived: ", len(survived), " Died: ",(Died))
+    
+    if((len(Pool.species) == 1 and Died == len(Pool.species)) or Died == len(Pool.species)):
+        print("One species left which died")
+        pass
+    else:
+        Pool.species = survived
 ##-------------------------------------------------------------------------------------
 
 
@@ -1411,7 +1432,6 @@ for i in range(NumberOfGenerations):
     print("NUMBER OF SPECIES: ", len(Pool.species), "GENERATION: ",i,"POPULATION SIZE",len(Population))
     print("SPECIE(S) RUNDOWN....................................................")
     if i == NumberOfGenerations - 1:
-        cap.release()
         cv2.destroyAllWindows()
     for i in Pool.species:
         print("Fitness: ", i.getSpeciesFitness(), "Average: ", i.getAverageFitness(), "Highest Genome: ",i.getHighestFitnessGenome(), " Staleness: ",i.getStaleness())
