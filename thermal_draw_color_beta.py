@@ -1,43 +1,50 @@
 import seeed_mlx9064x
+import pickle
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 from scipy import ndimage
+import random as randchoice
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
+import import_ipynb
+from ipynb.fs.full.Functions import Pool_
+from ipynb.fs.full.Functions import newSpecies
+from ipynb.fs.full.Functions import createNewGenome
+from ipynb.fs.full.Functions import connectionGene
+from ipynb.fs.full.Functions import Neuron
+from ipynb.fs.full.Functions import updateInputs
+from ipynb.fs.full.Functions import obtainOutputs
+from ipynb.fs.full.Functions import setNetworkTrackbarValues
+from ipynb.fs.full.Functions import CreateTrackbarValues
+from ipynb.fs.full.Functions import createHoughTrackbarValues
+from ipynb.fs.full.Functions import setDefaultTrackbarValues
+from ipynb.fs.full.Functions import hsv_color_space
+from ipynb.fs.full.Functions import evaluateGenome
+from ipynb.fs.full.Functions import houghLines
 
-#mlx = seeed_mlx9064x.grove_mxl90640()
-mlx = seeed_mlx9064x.grove_mxl90641()
+cv2.namedWindow("Default Window")
+cv2.namedWindow("Network Window")
+cv2.namedWindow("HSV BARS")
+cv2.namedWindow("HOUGH BARS")
+
+mlx = seeed_mlx9064x.grove_mxl90640()
 mlx.refresh_rate = seeed_mlx9064x.RefreshRate.REFRESH_8_HZ  # The fastest for raspberry 4 
-# REFRESH_0_5_HZ = 0b000  # 0.5Hz
-# REFRESH_1_HZ = 0b001  # 1Hz
-# REFRESH_2_HZ = 0b010  # 2Hz
-# REFRESH_4_HZ = 0b011  # 4Hz
-# REFRESH_8_HZ = 0b100  # 8Hz
-# REFRESH_16_HZ = 0b101  # 16Hz
-# REFRESH_32_HZ = 0b110  # 32Hz
-# REFRESH_64_HZ = 0b111  # 64Hz
-#frame = [0]*192
-#frame = np.tile(0,192)
-mlx_shape = (16,12)
+mlx_shape = (24,32)
 
 mlx_interp_val = 10
 mlx_interp_shape = (mlx_shape[0]*mlx_interp_val,
-                    mlx_shape[1]*mlx_interp_val) #new shape(160 by 120)
+                    mlx_shape[1]*mlx_interp_val) #new shape(240 by 320)
 
-fig = plt.figure(figsize=(12,9))#start fig??
-
+fig = plt.figure(figsize=(4,3))#start fig??
 ax = fig.add_subplot(111)#subplot?
-fig.subplots_adjust(0.05,0.05,0.95,0.95) # get rid of unnecessary padding
+fig.subplots_adjust(0,0,1,1) # get rid of unnecessary padding
+#fig.subplots_adjust(0.002,0.0001,0.9,1)
+#fig.subplots_adjust(0.002,0.02,1,1) # get rid of unnecessary padding
 therm1 = ax.imshow(np.zeros(mlx_interp_shape),interpolation='none',
                    cmap=plt.cm.bwr,vmin=25,vmax=45) # preemptive image
-cbar = fig.colorbar(therm1) # setup colorbar
-cbar.set_label('Temperature [$^{\circ}$C]',fontsize=14) # colorbar label
-
 fig.canvas.draw() # draw figure to copy background
 ax_background = fig.canvas.copy_from_bbox(ax.bbox) # copy background
-fig.show() # show the figure before blitting
-
 
 frame = np.zeros(mlx_shape[0]*mlx_shape[1])
 
@@ -48,24 +55,63 @@ def updateplot():
     data_array = ndimage.zoom(data_array,mlx_interp_val) # interpolate
     therm1.set_array(data_array) # set data
     therm1.set_clim(vmin=np.min(data_array),vmax=np.max(data_array)) # set bounds
-    cbar.on_mappable_changed(therm1) # update colorbar range
     ax.draw_artist(therm1) # draw new thermal image
     fig.canvas.blit(ax.bbox) # draw background
     fig.canvas.flush_events() # show the new image
     return
 
 t_array = []
+
+def load_pool():
+    pickle_in = open('Pool_data.pickle','rb')
+    saved_pool = pickle.load(pickle_in)
+    pickle_in.close()
+    return saved_pool
+
+Genome_Pool = load_pool()
+#store and pick random genome
+Total_Population = []
+for s in Genome_Pool.species:
+    for g in s.genomes:
+        Total_Population.append(g)
+        
+test_subject = randchoice.choice(Total_Population)
+#print('tpyre', type(test_subject))
+CreateTrackbarValues()
+testOutputs = np.array([])
+testOutputs = np.tile(0,6)
 while True:
     t1 = time.monotonic() # for determining frame rate
-    try:
-        updateplot() # update plot
-        canvas = FigureCanvas(fig)
-        canvas.draw()
-        graph_image = np.array(fig.canvas.get_renderer()._renderer)
-        graph_image = cv2.cvtColor(graph_image,cv2.COLOR_RGB2BGR)
-        cv2.imshow("graph image",graph_image)
-    except:
-        continue
+    #try:
+    updateplot() # update plot
+    canvas = FigureCanvas(fig)
+    plt.axis("off")
+    plt.axis("tight")
+    plt.axis("image")
+    canvas.draw()
+    graph_image = np.array(fig.canvas.get_renderer()._renderer)
+    cv2.imshow("graph image",graph_image)
+    setDefaultTrackbarValues()
+        
+    mask   = hsv_color_space(graph_image)
+    mask   = cv2.resize(mask, (128,128))
+    #print('works')
+    updateInputs(test_subject,mask.flatten())
+        #print('Genome')
+    #print('works1')
+    evaluateGenome(test_subject)
+    #print('Genome1')
+    setNetworkTrackbarValues(obtainOutputs(test_subject,testOutputs))
+        
+    print(obtainOutputs)
+    mask = hsv_color_space(graph_image)
+    mask  = houghLines(mask)
+    mask  = cv2.resize(mask, (128,128))
+        
+    cv2.imshow("Network Window", mask)
+    #print('Final')
+    #except:
+        #continue
     # approximating frame rate
     t_array.append(time.monotonic()-t1)
     if len(t_array)>10:
